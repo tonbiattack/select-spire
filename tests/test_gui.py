@@ -126,7 +126,8 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(state.status, "reward")
         reward = state.rewards[0]
         deck_size = len(state.deck)
-        buttons = [widget for widget in self._widgets() if isinstance(widget, tk.Button)]
+        buttons = [widget for widget in self._widgets() if isinstance(widget, tk.Button)
+                   and widget.cget("text") != "最初からやり直す"]
         self.assertEqual(len(buttons), len(state.rewards))
         buttons[0].invoke()
         self.root.update_idletasks()
@@ -159,6 +160,57 @@ class GuiTests(unittest.TestCase):
         text = "\n".join(self._texts())
         self.assertNotIn("armor", text)
         self.assertNotIn("status", text)
+
+    def test_restart_cancel_preserves_progress_and_selection(self):
+        state = self.app.game.state
+        state.hand = [WHERE, JOIN]
+        state.player_hp = 27
+        self.app.render()
+        self.app.toggle_card(0)
+        self.app.choose_column("id")
+        game = self.app.game
+        with patch.object(gui.messagebox, "askyesno", return_value=False) as confirm:
+            self._click("最初からやり直す")
+        confirm.assert_called_once()
+        self.assertIs(self.app.game, game)
+        self.assertEqual(state.player_hp, 27)
+        self.assertEqual(self.app.selected, {0})
+        self.assertEqual(self.app.column, "id")
+        self.assertTrue(game.path.exists())
+
+    def test_restart_confirm_resets_progress_and_closes_old_game(self):
+        old_game = self.app.game
+        old_path = old_game.path
+        state = old_game.state
+        state.floor = 3
+        state.player_hp = 11
+        state.deck.append(JOIN)
+        state.relics.append("join")
+        self.app.selected = {0}
+        self.app.column = "id"
+        self.app.render()
+        with patch.object(gui.messagebox, "askyesno", return_value=True):
+            self._click("最初からやり直す")
+        self.assertIsNot(self.app.game, old_game)
+        self.assertFalse(old_path.exists())
+        self.assertTrue(self.app.game.path.exists())
+        self.assertEqual(self.app.game.state.floor, 0)
+        self.assertEqual(self.app.game.state.player_hp, 50)
+        self.assertEqual(self.app.game.state.turn, 1)
+        self.assertEqual(len(self.app.game.state.deck), 12)
+        self.assertEqual(self.app.game.state.relics, [])
+        self.assertEqual(self.app.selected, set())
+        self.assertIsNone(self.app.column)
+
+    def test_restart_is_available_during_reward(self):
+        state = self.app.game.state
+        state.enemy_hp = 1
+        self.app.attack()
+        self.assertEqual(state.status, "reward")
+        with patch.object(gui.messagebox, "askyesno", return_value=True):
+            self._click("最初からやり直す")
+        self.assertEqual(self.app.game.state.status, "battle")
+        self.assertEqual(self.app.game.state.floor, 0)
 
     def test_retry_closes_old_game_and_resets_state(self):
         old_game = self.app.game

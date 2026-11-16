@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 from .data import FLOORS
 from .game import Game, GameError
@@ -124,6 +124,15 @@ class SpireApp:
         self.notice_error = False
         self.canvas.yview_moveto(0)
         self.render()
+
+    def confirm_new_game(self):
+        if messagebox.askyesno(
+            "最初からやり直す",
+            "現在の階層、HP、獲得したカードなどの進捗が失われます。\n最初からやり直しますか？",
+            parent=self.root,
+            default=messagebox.NO,
+        ):
+            self.new_game()
 
     def _label(self, parent, text, *, size=10, color=INK, bg=PAPER,
                bold=False, wrap=800, **kwargs):
@@ -289,6 +298,9 @@ class SpireApp:
         self._label(header, "▰  SELECT Spire", size=16, color=PAPER, bg=INK,
                     bold=True).pack(anchor="w")
         self._label(header, "敵のHPを0にすると次へ。あなたのHPは引き継ぎ、0になると敗北。", color="#d8e8ec", bg=INK, wrap=430).pack(anchor="w")
+        if state.status in ("battle", "reward"):
+            self._button(header, "最初からやり直す", self.confirm_new_game,
+                         wrap=400).pack(anchor="w", pady=(6, 0))
 
         body = tk.Frame(self.page, bg=BACKGROUND, padx=12, pady=10)
         body.pack(fill="both", expand=True)
