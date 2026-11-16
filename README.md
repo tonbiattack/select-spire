@@ -1,18 +1,20 @@
 # SELECT Spire
 
-SQLの句をカードで組み立て、敵テーブルの弱点を突いて塔を登る、ひとり用CLIローグライク。8フロアとボスを突破しよう。
+SQLの句をカードで組み立て、敵テーブルの弱点を突いて塔を登る、ひとり用ローグライク。8フロアとボスを突破しよう。
 
 ## 起動
 
 Python 3.11以上が必要です。追加パッケージは不要です。
 
 ```sh
-python -m select_spire
+python -m select_spire.gui
 ```
 
-Windowsで日本語が文字化けする場合は `python -X utf8 -m select_spire` を使用してください。乱数を固定するには `--seed 7` を付けます。テストは `python -m unittest discover -s tests -v` で実行できます。
+カードをクリックして攻撃を組み立てるウィンドウが開きます。コマンド入力は不要です。偵察で弱点を見つけ、攻撃し、倒しきれなかったらターンを終了しましょう。操作方法は画面にも表示されます。
 
-## 最初の戦闘
+従来のCLIは `python -m select_spire` で起動できます。WindowsでCLIの日本語が文字化けする場合は `python -X utf8 -m select_spire` を使用してください。GUI・CLIともに乱数を固定するには `--seed 7` を付けます。テストは `python -m unittest discover -s tests -v` で実行できます。GUIにはPythonの標準Tkinterが必要です。
+
+## CLIでの戦闘
 
 盤面と5枚の手札が出たら `scout 2` のように偵察カードの番号を指定します。隠れた列が公開され、弱点かどうかが分かります。番号は手札に表示されたものを使ってください。
 
