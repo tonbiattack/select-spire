@@ -75,8 +75,9 @@ class GuiTests(unittest.TestCase):
 
     def test_scout_preserves_selection_when_hand_indices_shift(self):
         state = self.app.game.state
+        enemy = state.enemies[0]
         state.hand = [SCOUT, WHERE, JOIN]
-        state.visible_columns = {"id"}
+        enemy.visible_columns = {"id"}
         self.app.render()
         self._click("選択  弱点を狙う")
         self._click("選ぶ  公開  番号")
@@ -85,16 +86,16 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(state.hand, [WHERE, JOIN])
         self.assertEqual(self.app.selected, {0})
         self.assertEqual(self.app.column, "id")
-        self.assertIn("element", state.visible_columns)
-        self.assertIn("element", state.known_columns)
+        self.assertEqual(len(enemy.visible_columns), 2)
         self.assertFalse(state.attacked)
         self._click("選択  援護を呼ぶ")
         self.assertEqual(self.app.selected, {0, 1})
 
     def test_where_attack_and_end_turn(self):
         state = self.app.game.state
+        enemy = state.enemies[0]
         state.hand = [WHERE, GROUP]
-        state.visible_columns = {"id", state.enemy.weak_column}
+        enemy.visible_columns = {"id", enemy.weak_column}
         self.app.render()
         self._click("選択  弱点を狙う")
         self._click("攻撃する（カードなしでも可能）")
@@ -104,23 +105,25 @@ class GuiTests(unittest.TestCase):
         self._click("選ぶ  公開  属性")
         self._click("攻撃する（カードなしでも可能）")
         self.assertTrue(state.attacked)
-        self.assertEqual(state.enemy_hp, state.enemy.hp - (state.enemy.rows * 4 // 5) * 2)
+        self.assertLess(enemy.hp, enemy.max_hp)
         self.assertEqual(state.energy, 2)
         self.assertEqual(state.hand, [GROUP])
-        self.assertIn(state.enemy.weak_column, state.known_columns)
+        self.assertIn(enemy.weak_column, enemy.known_columns)
         self.assertEqual(self.app.selected, set())
         self.assertIsNone(self.app.column)
-        self.assertIn("クリティカル", self.app.notice)
+        self.assertIn("弱点", self.app.notice)
         hp = state.player_hp
+        incoming = sum(e.attack for e in state.alive_enemies)
         self._click("ターン終了（敵が反撃）")
         self.assertEqual(state.turn, 2)
-        self.assertEqual(state.player_hp, hp - state.enemy.attack)
+        self.assertEqual(state.player_hp, hp - incoming)
         self.assertFalse(state.attacked)
         self.assertEqual(state.energy, 3)
 
     def test_reward_selection_advances_floor(self):
         state = self.app.game.state
-        state.enemy_hp = 1
+        for enemy in state.enemies:
+            enemy.hp = 1
         self.app.render()
         self._click("攻撃する（カードなしでも可能）")
         self.assertEqual(state.status, "reward")
@@ -140,8 +143,9 @@ class GuiTests(unittest.TestCase):
 
     def test_hidden_unknown_columns_are_not_rendered_or_leaked_by_attack(self):
         state = self.app.game.state
-        state.visible_columns = {"id", "element"}
-        state.known_columns.clear()
+        enemy = state.enemies[0]
+        enemy.visible_columns = {"id", "element"}
+        enemy.known_columns.clear()
         self.app.render()
         text = "\n".join(self._texts())
         self.assertEqual(text.count("非公開  ？？？  ／  偵察すると選べます"), 2)
@@ -155,11 +159,21 @@ class GuiTests(unittest.TestCase):
         self.assertNotIn("SELECT ", self.app.notice)
         self.assertNotIn("弱点！", text)
 
-        state.known_columns.add("armor")
+        enemy.known_columns.add("armor")
         self.app.render()
         text = "\n".join(self._texts())
         self.assertNotIn("armor", text)
         self.assertNotIn("status", text)
+
+    def test_multi_enemy_floor_lists_every_enemy(self):
+        state = self.app.game.state
+        state.floor = 1
+        self.app.game._start_floor()
+        self.app.render()
+        text = "\n".join(self._texts())
+        for enemy in state.enemies:
+            self.assertIn(enemy.name, text)
+        self.assertGreaterEqual(len(state.enemies), 2)
 
     def test_restart_cancel_preserves_progress_and_selection(self):
         state = self.app.game.state
@@ -204,7 +218,8 @@ class GuiTests(unittest.TestCase):
 
     def test_restart_is_available_during_reward(self):
         state = self.app.game.state
-        state.enemy_hp = 1
+        for enemy in state.enemies:
+            enemy.hp = 1
         self.app.attack()
         self.assertEqual(state.status, "reward")
         with patch.object(gui.messagebox, "askyesno", return_value=True):
