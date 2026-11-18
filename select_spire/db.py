@@ -1,6 +1,6 @@
 """Read-only, budgeted execution of generated SQLite SELECT statements."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import re
 import sqlite3
@@ -20,6 +20,7 @@ class QueryResult:
     elapsed_ms: float
     over_budget: bool = False
     error: str | None = None
+    rows: list[tuple] = field(default_factory=list)
 
 
 # Only these SQLite authorizer actions are needed for ordinary SELECTs,
@@ -56,11 +57,12 @@ def execute_select(
     deadline = start + timeout_ms / 1000
     row_count = 0
     columns: tuple[str, ...] = ()
+    rows: list[tuple] = []
     connection: sqlite3.Connection | None = None
 
     def result(over_budget: bool = False, error: str | None = None) -> QueryResult:
         return QueryResult(row_count, columns, (time.monotonic() - start) * 1000,
-                           over_budget, error)
+                           over_budget, error, list(rows))
 
     if timeout_ms <= 0:
         return result(True, "Query timed out")
@@ -95,6 +97,7 @@ def execute_select(
             if row_count == max_rows:
                 return result(True)
             row_count += 1
+            rows.append(row)
     except sqlite3.Error as exc:
         if time.monotonic() >= deadline:
             return result(True, "Query timed out")

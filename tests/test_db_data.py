@@ -8,7 +8,13 @@ import sqlite3
 import tempfile
 import unittest
 
-from select_spire.data import FLOORS, generate_database, mutate_database
+from select_spire.data import (
+    FLOOR_ENEMIES,
+    FLOORS,
+    battle_view,
+    generate_database,
+    mutate_database,
+)
 from select_spire.db import Query, execute_select
 
 
@@ -24,8 +30,9 @@ class DatabaseTests(unittest.TestCase):
             return connection.execute(f'SELECT * FROM "{table}" ORDER BY id').fetchall()
 
     def test_nine_floors_have_weak_rows_and_support(self):
-        self.assertEqual(len(FLOORS), 9)
-        self.assertEqual(len({enemy.table for enemy in FLOORS}), 9)
+        self.assertEqual(len(FLOOR_ENEMIES), 9)
+        self.assertEqual(len(FLOORS), sum(len(floor) for floor in FLOOR_ENEMIES))
+        self.assertEqual(len({enemy.table for enemy in FLOORS}), len(FLOORS))
         support_ids = {row[0] for row in self.rows("support")}
         for enemy in FLOORS:
             with self.subTest(enemy=enemy.name):
@@ -34,6 +41,16 @@ class DatabaseTests(unittest.TestCase):
                 weak_index = enemy.columns.index(enemy.weak_column)
                 self.assertEqual(sum(row[weak_index] == "weak" for row in rows), enemy.rows * 4 // 5)
                 self.assertTrue({row[0] for row in rows} <= support_ids)
+
+    def test_battle_views_union_their_floor_enemies(self):
+        for floor_index, floor in enumerate(FLOOR_ENEMIES):
+            with self.subTest(floor=floor_index + 1):
+                rows = self.rows(battle_view(floor_index))
+                self.assertEqual(len(rows), sum(enemy.rows for enemy in floor))
+                self.assertEqual({row[0] for row in rows}, {enemy.table for enemy in floor})
+                # Row ids must stay unique across the union so JOIN matches once.
+                ids = [row[1] for row in rows]
+                self.assertEqual(len(ids), len(set(ids)))
 
     def test_same_seed_produces_same_data_and_existing_file_is_preserved(self):
         second = Path(self.temp.name) / "second.sqlite3"
@@ -74,6 +91,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertIsNone(result.error)
         self.assertEqual(result.columns, ("id",))
         self.assertEqual(result.row_count, enemy.rows * 4 // 5)
+        self.assertEqual(len(result.rows), result.row_count)
         for sql in (
             f'DELETE FROM "{enemy.table}"',
             f'UPDATE "{enemy.table}" SET element = "bad"',

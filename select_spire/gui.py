@@ -6,7 +6,7 @@ import argparse
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from .data import FLOORS
+from .data import FLOOR_ENEMIES
 from .game import Game, GameError
 
 
@@ -21,9 +21,11 @@ PALE = "#dbe9eb"
 BORDER = "#c8d5dd"
 
 CARD_TEXT = {
-    "where": ("弱点を狙う", "選んだ後、公開列を指定。弱点なら全体2倍、外すと基本0ダメージ。"),
-    "join": ("援護を呼ぶ", "攻撃のダメージを5増やす。"),
-    "group": ("集計する", "攻撃のダメージを3増やす。"),
+    "where": ("弱点を狙う", "公開列を指定。弱点の敵だけを狙い、その敵へのダメージ2倍。"),
+    "join": ("援護を呼ぶ", "ダメージ+3。隠れた列を1つ公開する。"),
+    "group": ("集計する", "全員に最低4ダメージ。散った敵をまとめて削る。"),
+    "order": ("並べ替える", "ダメージを最も弱った敵に集中させる。"),
+    "limit": ("1体に絞る", "最多ヒットの敵だけに+8ダメージ。"),
     "scout": ("偵察する", "押すとすぐに非公開列を1つ公開し、弱点か調べる。"),
 }
 COLUMN_NAMES = {
@@ -166,11 +168,10 @@ class SpireApp:
     def _cost(self, card):
         return max(0, card.cost - int(card.kind in self.game.state.relics))
 
-    def _column_result(self, column):
-        state = self.game.state
-        if column not in state.known_columns:
+    def _column_result(self, enemy, column):
+        if column not in enemy.known_columns:
             return "未調査"
-        return "弱点！" if column == state.enemy.weak_column else "弱点ではない"
+        return "弱点！" if column == enemy.weak_column else "弱点ではない"
 
     def _set_notice(self, message, error=False):
         self.notice = message
@@ -225,7 +226,7 @@ class SpireApp:
 
     def choose_column(self, column):
         state = self.game.state
-        if column not in state.visible_columns or not any(
+        if not any(column in enemy.visible_columns for enemy in state.alive_enemies) or not any(
             state.hand[i].kind == "where" for i in self.selected
         ):
             self._set_notice("弱点を狙うカードを選び、公開列を指定してください。", True)
@@ -251,7 +252,9 @@ class SpireApp:
             self._set_notice(f"必要エネルギーは{cost}、残りは{state.energy}です。", True)
             self.render()
             return
-        if "where" in kinds and self.column not in state.visible_columns:
+        if "where" in kinds and not any(
+            self.column in enemy.visible_columns for enemy in state.alive_enemies
+        ):
             self._set_notice("弱点を狙うカードには、公開列を1つ選んでください。", True)
             self.render()
             return
@@ -308,12 +311,24 @@ class SpireApp:
         self._label(body, guide, bg=BACKGROUND, color=ACCENT, bold=True,
                     wrap=430).pack(anchor="w", pady=(0, 8))
 
-        overview = self._section(body, f"{state.floor + 1} / {len(FLOORS)}階　{state.enemy.name}　ターン {state.turn}")
-        self._label(overview, f"あなたのHP  {state.player_hp} / 50　　敵のHP  {state.enemy_hp} / {state.enemy.hp}",
-                    size=12, color=HEALTH, bold=True, wrap=430).pack(anchor="w")
-        if state.status == "battle":
-            self._label(overview, f"敵の反撃予告：{state.enemy.attack}ダメージ ＋ {TRAITS.get(state.enemy.trait, state.enemy.trait)}",
-                        color=HEALTH, wrap=430).pack(anchor="w", pady=(3, 0))
+        overview = self._section(body, f"{state.floor + 1} / {len(FLOOR_ENEMIES)}階　ターン {state.turn}")
+        self._label(overview, f"あなたのHP  {state.player_hp} / 50", size=12, color=HEALTH, bold=True, wrap=430).pack(anchor="w")
+        for enemy in state.enemies:
+            mark = "" if enemy.alive else "（撃破済み）"
+            self._label(
+                overview,
+                f"{enemy.name}{mark}  HP {enemy.hp} / {enemy.max_hp}",
+                color=HEALTH if enemy.alive else MUTED,
+                bold=enemy.alive,
+                wrap=430,
+            ).pack(anchor="w", pady=(2, 0))
+            if state.status == "battle" and enemy.alive:
+                self._label(
+                    overview,
+                    f"  予告: {enemy.attack}ダメージ ＋ {TRAITS.get(enemy.trait, enemy.trait)}",
+                    color=HEALTH,
+                    wrap=430,
+                ).pack(anchor="w")
 
         notice_bg = "#fbecef" if self.notice_error else "#e5f1f1"
         notice = tk.Frame(body, bg=notice_bg, padx=10, pady=7)
@@ -352,23 +367,26 @@ class SpireApp:
         self._label(table, "『弱点を狙う』カードを選んでから公開列を指定。外すと基本ダメージは0。",
                     color=MUTED, wrap=430).pack(anchor="w")
         where_selected = any(state.hand[i].kind == "where" for i in self.selected)
-        # Hide names of unrevealed columns, but retain previously learned findings.
-        for column in state.enemy.columns:
-            if column in state.visible_columns:
-                result = self._column_result(column)
-                text = f"公開  {self._column_name(column)}  ／  {result}"
-                row = tk.Frame(table, bg=PAPER)
-                row.pack(fill="x", pady=(3, 0))
-                if where_selected and not state.attacked:
-                    self._button(row, ("✓ " if self.column == column else "選ぶ  ") + text,
-                                 lambda c=column: self.choose_column(c),
-                                 selected=self.column == column, wrap=400).pack(fill="x")
+        for enemy in state.enemies:
+            if not enemy.alive:
+                continue
+            self._label(table, enemy.name, color=INK, bold=True, wrap=430).pack(anchor="w", pady=(6, 0))
+            for column in enemy.columns:
+                if column in enemy.visible_columns:
+                    result = self._column_result(enemy, column)
+                    text = f"公開  {self._column_name(column)}  ／  {result}"
+                    row = tk.Frame(table, bg=PAPER)
+                    row.pack(fill="x", pady=(3, 0))
+                    if where_selected and not state.attacked:
+                        self._button(row, ("✓ " if self.column == column else "選ぶ  ") + text,
+                                     lambda c=column: self.choose_column(c),
+                                     selected=self.column == column, wrap=400).pack(fill="x")
+                    else:
+                        self._label(row, text, color=WEAK if result == "弱点！" else INK,
+                                    wrap=430).pack(anchor="w")
                 else:
-                    self._label(row, text, color=WEAK if result == "弱点！" else INK,
-                                wrap=430).pack(anchor="w")
-            else:
-                text = "非公開  ？？？  ／  偵察すると選べます"
-                self._label(table, text, color=MUTED, wrap=430).pack(anchor="w", pady=(3, 0))
+                    text = "非公開  ？？？  ／  偵察すると選べます"
+                    self._label(table, text, color=MUTED, wrap=430).pack(anchor="w", pady=(3, 0))
 
         hand = self._section(body, "手札")
         cost = sum(self._cost(state.hand[i]) for i in self.selected)

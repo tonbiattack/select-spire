@@ -15,24 +15,35 @@ HELP = """\
 手札番号は1から。WHEREカードを使うときは --where で公開列を指定。
 例: 手札1がWHEREなら attack 1 --where element でelement列を狙う。
 偵察は隠れた列を1つ公開し、弱点かどうかも知らせる。
-JOINやWHEREのカードを選び、エネルギーの範囲で組み立てよう。
-通常スキャンはNULLを含む行を除外する。WHEREは指定列だけを調べる。
+句ごとの役割:
+  WHERE   弱点の敵だけを狙う（弱点なら2倍）
+  JOIN    ダメージ+3、隠れた列を1つ公開
+  GROUP BY 全員に最低4ダメージ
+  ORDER BY ダメージを最も弱った敵に集中
+  LIMIT 1 最多ヒットの敵に+8ダメージ
 攻撃は1ターンに1回。偵察カードは単独で使う。
 """
+
+TRAITS = {"hide": "公開列を隠す", "null": "NULL混入", "grow": "行を4件増やす"}
 
 
 def _show_state(state):
     print(f"\n--- フロア {state.floor + 1} / ターン {state.turn} ---")
     print(f"あなたのHP: {state.player_hp}  エネルギー: {state.energy}  デッキ: {len(state.deck)}枚")
-    print(f"敵: {state.enemy.name}  テーブル: {state.enemy.table}  HP: {state.enemy_hp}/{state.enemy.hp}")
-    if state.status == "battle":
-        traits = {"hide": "公開列を隠す", "null": "NULL混入", "grow": "行を4件増やす"}
-        print(f"敵の予告: {state.enemy.attack}ダメージ + {traits[state.enemy.trait]}")
-    print(f"公開列: {', '.join(sorted(state.visible_columns)) or 'なし'}")
-    known = state.known_columns & state.visible_columns
-    if known:
-        hints = [f"{col}={'弱点' if col == state.enemy.weak_column else '弱点ではない'}" for col in sorted(known)]
-        print(f"調査結果: {', '.join(hints)}")
+    for enemy in state.enemies:
+        mark = "" if enemy.alive else "（撃破済み）"
+        print(f"敵: {enemy.name}{mark}  HP: {enemy.hp}/{enemy.max_hp}  テーブル: {enemy.table}")
+        if state.status == "battle" and enemy.alive:
+            print(f"  予告: {enemy.attack}ダメージ + {TRAITS.get(enemy.trait, enemy.trait)}")
+        visible = ", ".join(sorted(enemy.visible_columns)) or "なし"
+        print(f"  公開列: {visible}")
+        known = enemy.known_columns & enemy.visible_columns
+        if known:
+            hints = [
+                f"{col}={'弱点' if col == enemy.weak_column else '弱点ではない'}"
+                for col in sorted(known)
+            ]
+            print(f"  調査結果: {', '.join(hints)}")
     if state.status != "battle":
         return
     print("手札:")
@@ -44,7 +55,7 @@ def _show_state(state):
         print("  なし")
     if state.relics:
         print(f"レリック: {', '.join(state.relics)}")
-    if state.attacked and state.status == "battle":
+    if state.attacked:
         print("攻撃済み: 偵察するか、end でターンを終了")
 
 
@@ -68,7 +79,7 @@ def _attack(game, arguments):
             if column is not None or i + 1 >= len(arguments):
                 raise ValueError("--where は公開列名を1つ指定してください。")
             column = arguments[i + 1]
-            if column not in game.state.visible_columns:
+            if not any(column in enemy.visible_columns for enemy in game.state.alive_enemies):
                 raise ValueError("列は表示されている公開列から指定してください。")
             i += 2
         else:
